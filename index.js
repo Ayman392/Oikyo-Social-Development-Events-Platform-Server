@@ -1,31 +1,289 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import { MongoClient } from "mongodb";
+import { MongoClient, ObjectId } from "mongodb";
 
 dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 5000;
 
-app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
+app.use(cors({ origin: process.env.CLIENT_URL }));
 app.use(express.json());
 
+// ---------- Database ----------
+
 const client = new MongoClient(process.env.MONGODB_URI);
+await client.connect();
+console.log("Connected to MongoDB");
 
-async function run() {
-  await client.connect();
-  const db = client.db("eventsPlatform");
-  const events = db.collection("events");
-  const joinedEvents = db.collection("joinedEvents");
+const db = client.db("eventsPlatform");
+const events = db.collection("events");
+const joinedEvents = db.collection("joinedEvents");
 
-  // Prevent a user joining the same event twice
-  await joinedEvents.createIndex({ eventId: 1, userEmail: 1 }, { unique: true });
+// A user can only join a given event once
+await joinedEvents.createIndex({ eventId: 1, userEmail: 1 }, { unique: true });
 
-  console.log("Connected to MongoDB");
+// ---------- Helpers ----------
+
+const EVENT_TYPES = [
+  "Cleanup",
+  "Plantation",
+  "Donation",
+  "Education",
+  "Health Camp",
+  "Food Distribution",
+  "Other",
+];
+
+function isValidUrl(text) {
+  try {
+    const url = new URL(text);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
-run().catch(console.error);
 
-app.get("/", (req, res) => res.json({ message: "Events Platform API is running" }));
+// Checks the event data and returns an object of error messages (empty = all good)
+function validateEvent(data) {
+  const errors = {};
 
-app.listen(port, () => console.log(`Server listening on port ${port}`));
+  if (!data.title || data.title.trim().length < 3 || data.title.trim().length > 100) {
+    errors.title = "Title must be between 3 and 100 characters.";
+  }
+
+  if (!data.description || data.description.trim().length < 20 || data.description.trim().length > 1000) {
+    errors.description = "Description must be between 20 and 1000 characters.";
+  }
+
+  if (!EVENT_TYPES.includes(data.eventType)) {
+    errors.eventType = "Please choose a valid event type.";
+  }
+
+  if (!data.thumbnail || !isValidUrl(data.thumbnail)) {
+    errors.thumbnail = "Please enter a valid image URL.";
+  }
+
+  if (!data.location || data.location.trim().length < 3 || data.location.trim().length > 120) {
+    errors.location = "Location must be between 3 and 120 characters.";
+  }
+
+  // The date must be tomorrow or later
+  const date = new Date(data.eventDate);
+  const tomorrow = new Date();
+  tomorrow.setHours(0, 0, 0, 0);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  if (!data.eventDate || isNaN(date.getTime())) {
+    errors.eventDate = "Please choose an event date.";
+  } else if (date < tomorrow) {
+    errors.eventDate = "The event date must be in the future.";
+  }
+
+  // Guidelines are optional, but if given, each line must be a sensible length
+  if (data.guidelines !== undefined) {
+    const lines = Array.isArray(data.guidelines) ? data.guidelines : [];
+    if (lines.length > 6 || lines.some((line) => line.trim().length < 3 || line.trim().length > 150)) {
+      errors.guidelines = "Add up to 6 guidelines, each 3 to 150 characters.";
+    }
+  }
+
+  return errors;
+}
+
+// ---------- Routes ----------
+
+app.get("/", (req, res) => {
+  res.json({ message: "HopeNetwork API is running" });
+});
+
+// Upcoming events, soonest first. Use ?limit=6 to get only a few.
+app.get("/events/upcoming", async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 0; // 0 means no limit
+
+    // Events happening today still count as upcoming
+    const startOfToday = new Date();
+    startOfToday.setUTCHours(0, 0, 0, 0);
+
+    const upcoming = await events
+      .find({ eventDate: { $gte: startOfToday } })
+      .sort({ eventDate: 1 })
+      .limit(limit)
+      .toArray();
+
+    res.json(upcoming);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Could not load events." });
+  }
+});
+
+// One event by id (public, no login needed)
+app.get("/events/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "That event link is not valid." });
+    }
+
+    const event = await events.findOne({ _id: new ObjectId(id) });
+
+    if (!event) {
+      return res.status(404).json({ message: "Event not found." });
+    }
+
+    res.json(event);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Could not load the event." });
+  }
+});
+
+// Create an event
+app.post("/events", async (req, res) => {
+  try {
+    const data = req.body;
+
+    const errors = validateEvent(data);
+    if (Object.keys(errors).length > 0) {
+      return res.status(400).json({ message: "Please fix the errors and try again.", errors });
+    }
+
+    // TEMPORARY: the creator comes from the request body.
+    // In the JWT step we will take these from the verified token instead.
+    if (!data.creatorEmail) {
+      return res.status(400).json({ message: "Creator email is required." });
+    }
+
+    const newEvent = {
+      title: data.title.trim(),
+      description: data.description.trim(),
+      eventType: data.eventType,
+      thumbnail: data.thumbnail.trim(),
+      location: data.location.trim(),
+      eventDate: new Date(data.eventDate),
+      guidelines: (data.guidelines || []).map((line) => line.trim()).filter(Boolean),
+      creatorEmail: data.creatorEmail,
+      creatorName: data.creatorName || "",
+      creatorPhoto: data.creatorPhoto || "",
+      volunteersCount: 0,
+      createdAt: new Date(),
+    };
+
+    const result = await events.insertOne(newEvent);
+
+    res.status(201).json({ message: "Event created successfully.", eventId: result.insertedId });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Could not create the event." });
+  }
+});
+
+// ---------- Join an event ----------
+
+app.post("/events/:id/join", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userEmail, userName } = req.body; // TEMPORARY: will come from the JWT later
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "That event link is not valid." });
+    }
+
+    if (!userEmail) {
+      return res.status(400).json({ message: "Please log in to join an event." });
+    }
+
+    const event = await events.findOne({ _id: new ObjectId(id) });
+    if (!event) {
+      return res.status(404).json({ message: "Event not found." });
+    }
+
+    // Past events can't be joined
+    const startOfToday = new Date();
+    startOfToday.setUTCHours(0, 0, 0, 0);
+    if (event.eventDate < startOfToday) {
+      return res.status(400).json({ message: "This event has already taken place." });
+    }
+
+    // Save the join together with the event and user details
+    try {
+      await joinedEvents.insertOne({
+        eventId: event._id,
+        userEmail,
+        userName: userName || "",
+        title: event.title,
+        thumbnail: event.thumbnail,
+        location: event.location,
+        eventType: event.eventType,
+        eventDate: event.eventDate,
+        joinedAt: new Date(),
+      });
+    } catch (error) {
+      // 11000 means the unique index found this user already joined this event
+      if (error.code === 11000) {
+        return res.status(409).json({ message: "You have already joined this event." });
+      }
+      throw error;
+    }
+
+    await events.updateOne({ _id: event._id }, { $inc: { volunteersCount: 1 } });
+
+    res.status(201).json({ message: "You have joined this event." });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Could not join the event." });
+  }
+});
+
+// Has this user already joined this event?
+app.get("/events/:id/is-joined", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { email } = req.query; // TEMPORARY: will come from the JWT later
+
+    if (!ObjectId.isValid(id) || !email) {
+      return res.json({ joined: false });
+    }
+
+    const record = await joinedEvents.findOne({
+      eventId: new ObjectId(id),
+      userEmail: email,
+    });
+
+    res.json({ joined: Boolean(record) });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Could not check your join status." });
+  }
+});
+
+// ---------- Joined events list ----------
+
+app.get("/joined-events", async (req, res) => {
+  try {
+    const { email } = req.query; // TEMPORARY: will come from the JWT later
+
+    if (!email) {
+      return res.status(400).json({ message: "Email is required." });
+    }
+
+    // Only this user's joins, soonest event first
+    const joined = await joinedEvents
+      .find({ userEmail: email })
+      .sort({ eventDate: 1 })
+      .toArray();
+
+    res.json(joined);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Could not load your joined events." });
+  }
+});
+
+app.listen(port, () => {
+  console.log(`Server listening on port ${port}`);
+});
