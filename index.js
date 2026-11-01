@@ -93,9 +93,10 @@ function validateEvent(data) {
 }
 
 // ---------- Routes ----------
+// Note: /events/upcoming and /events/mine must stay ABOVE /events/:id
 
 app.get("/", (req, res) => {
-  res.json({ message: "HopeNetwork API is running" });
+  res.json({ message: "Oikyo API is running" });
 });
 
 // Upcoming events, soonest first. Use ?limit=6 to get only a few.
@@ -117,6 +118,27 @@ app.get("/events/upcoming", async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Could not load events." });
+  }
+});
+
+// Events created by one user (for the Manage Events page)
+app.get("/events/mine", async (req, res) => {
+  try {
+    const { email } = req.query; // TEMPORARY: will come from the JWT later
+
+    if (!email) {
+      return res.status(400).json({ message: "Email is required." });
+    }
+
+    const mine = await events
+      .find({ creatorEmail: email })
+      .sort({ eventDate: 1 })
+      .toArray();
+
+    res.json(mine);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Could not load your events." });
   }
 });
 
@@ -179,6 +201,104 @@ app.post("/events", async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Could not create the event." });
+  }
+});
+
+// Update an event (owner only)
+app.patch("/events/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = req.body;
+    const userEmail = data.userEmail; // TEMPORARY: will come from the JWT later
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "That event link is not valid." });
+    }
+
+    if (!userEmail) {
+      return res.status(401).json({ message: "Please log in to update an event." });
+    }
+
+    const event = await events.findOne({ _id: new ObjectId(id) });
+    if (!event) {
+      return res.status(404).json({ message: "Event not found." });
+    }
+
+    // Only the person who created the event can change it
+    if (event.creatorEmail !== userEmail) {
+      return res.status(403).json({ message: "You can only update events you created." });
+    }
+
+    const errors = validateEvent(data);
+    if (Object.keys(errors).length > 0) {
+      return res.status(400).json({ message: "Please fix the errors and try again.", errors });
+    }
+
+    const changes = {
+      title: data.title.trim(),
+      description: data.description.trim(),
+      eventType: data.eventType,
+      thumbnail: data.thumbnail.trim(),
+      location: data.location.trim(),
+      eventDate: new Date(data.eventDate),
+      guidelines: (data.guidelines || []).map((line) => line.trim()).filter(Boolean),
+      updatedAt: new Date(),
+    };
+
+    await events.updateOne({ _id: event._id }, { $set: changes });
+
+    // Joined events keep a copy of the event details, so keep those copies up to date too
+    await joinedEvents.updateMany(
+      { eventId: event._id },
+      {
+        $set: {
+          title: changes.title,
+          thumbnail: changes.thumbnail,
+          location: changes.location,
+          eventType: changes.eventType,
+          eventDate: changes.eventDate,
+        },
+      }
+    );
+
+    res.json({ message: "Event updated successfully." });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Could not update the event." });
+  }
+});
+
+// Delete an event (owner only)
+app.delete("/events/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { email } = req.query; // TEMPORARY: will come from the JWT later
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "That event link is not valid." });
+    }
+
+    if (!email) {
+      return res.status(401).json({ message: "Please log in to delete an event." });
+    }
+
+    const event = await events.findOne({ _id: new ObjectId(id) });
+    if (!event) {
+      return res.status(404).json({ message: "Event not found." });
+    }
+
+    if (event.creatorEmail !== email) {
+      return res.status(403).json({ message: "You can only delete events you created." });
+    }
+
+    // Remove the volunteers' joins first, then the event itself
+    await joinedEvents.deleteMany({ eventId: event._id });
+    await events.deleteOne({ _id: event._id });
+
+    res.json({ message: "Event deleted." });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Could not delete the event." });
   }
 });
 
