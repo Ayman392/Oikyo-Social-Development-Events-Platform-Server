@@ -8,7 +8,7 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 5000;
 
-app.use(cors({ origin: process.env.CLIENT_URL }));
+app.use(cors({ origin: [process.env.CLIENT_URL, "http://localhost:3000"] }));
 app.use(express.json());
 
 // ---------- Database ----------
@@ -404,6 +404,10 @@ app.get("/joined-events", async (req, res) => {
   }
 });
 
-app.listen(port, () => {
-  console.log(`Server listening on port ${port}`);
-});
+if(!process.env.VERCEL){
+  app.listen(port, () => {
+    console.log(`Server listening on port ${port}`);
+  });
+}
+
+export default  app;
