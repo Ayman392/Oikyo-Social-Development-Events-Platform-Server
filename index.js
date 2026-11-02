@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { MongoClient, ObjectId } from "mongodb";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 
 dotenv.config();
 
@@ -92,11 +93,53 @@ function validateEvent(data) {
   return errors;
 }
 
+// ---------- Login check (JWT) ----------
+
+// The address of the client site, where the login system publishes its public keys
+const AUTH_URL = process.env.AUTH_URL;
+const keys = AUTH_URL ? createRemoteJWKSet(new URL(`${AUTH_URL}/api/auth/jwks`)) : null;
+
+// Put this in front of any route that needs a logged-in user.
+// It reads the token, checks it, and saves who the user is in req.user.
+async function verifyToken(req, res, next) {
+  if (!keys) {
+    return res.status(500).json({ message: "The server is not set up to check logins yet." });
+  }
+
+  const header = req.headers.authorization || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+
+  if (!token) {
+    return res.status(401).json({ message: "Please log in to continue." });
+  }
+
+  try {
+    const { payload } = await jwtVerify(token, keys, {
+      issuer: AUTH_URL,
+      audience: AUTH_URL,
+    });
+
+    if (!payload.email) {
+      return res.status(401).json({ message: "Your login could not be verified." });
+    }
+
+    req.user = { email: payload.email, name: payload.name, image: payload.image };
+    next();
+  } catch (error) {
+    res.status(401).json({ message: "Your session has expired. Please log in again." });
+  }
+}
+
 // ---------- Routes ----------
 // Note: /events/upcoming and /events/mine must stay ABOVE /events/:id
 
 app.get("/", (req, res) => {
   res.json({ message: "Oikyo API is running" });
+});
+
+// Test route: shows who the server thinks you are
+app.get("/me", verifyToken, (req, res) => {
+  res.json({ email: req.user.email, name: req.user.name });
 });
 
 // Upcoming events, soonest first. Use ?limit=6 to get only a few.
