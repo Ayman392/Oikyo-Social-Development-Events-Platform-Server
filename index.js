@@ -165,16 +165,11 @@ app.get("/events/upcoming", async (req, res) => {
 });
 
 // Events created by one user (for the Manage Events page)
-app.get("/events/mine", async (req, res) => {
+app.get("/events/mine", verifyToken, async (req, res) => {
   try {
-    const { email } = req.query; // TEMPORARY: will come from the JWT later
-
-    if (!email) {
-      return res.status(400).json({ message: "Email is required." });
-    }
-
+    // The email now comes from the verified token, not from the address
     const mine = await events
-      .find({ creatorEmail: email })
+      .find({ creatorEmail: req.user.email })
       .sort({ eventDate: 1 })
       .toArray();
 
@@ -248,11 +243,11 @@ app.post("/events", async (req, res) => {
 });
 
 // Update an event (owner only)
-app.patch("/events/:id", async (req, res) => {
+app.patch("/events/:id", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
     const data = req.body;
-    const userEmail = data.userEmail; // TEMPORARY: will come from the JWT later
+    const userEmail = req.user.userEmail; // TEMPORARY: will come from the JWT later
 
     if (!ObjectId.isValid(id)) {
       return res.status(400).json({ message: "That event link is not valid." });
@@ -315,14 +310,10 @@ app.patch("/events/:id", async (req, res) => {
 app.delete("/events/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { email } = req.query; // TEMPORARY: will come from the JWT later
+    const { email } = req.user.email; // TEMPORARY: will come from the JWT later
 
     if (!ObjectId.isValid(id)) {
       return res.status(400).json({ message: "That event link is not valid." });
-    }
-
-    if (!email) {
-      return res.status(401).json({ message: "Please log in to delete an event." });
     }
 
     const event = await events.findOne({ _id: new ObjectId(id) });
