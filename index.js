@@ -203,19 +203,13 @@ app.get("/events/:id", async (req, res) => {
 });
 
 // Create an event
-app.post("/events", async (req, res) => {
+app.post("/events", verifyToken, async (req, res) => {
   try {
     const data = req.body;
 
     const errors = validateEvent(data);
     if (Object.keys(errors).length > 0) {
       return res.status(400).json({ message: "Please fix the errors and try again.", errors });
-    }
-
-    // TEMPORARY: the creator comes from the request body.
-    // In the JWT step we will take these from the verified token instead.
-    if (!data.creatorEmail) {
-      return res.status(400).json({ message: "Creator email is required." });
     }
 
     const newEvent = {
@@ -226,9 +220,9 @@ app.post("/events", async (req, res) => {
       location: data.location.trim(),
       eventDate: new Date(data.eventDate),
       guidelines: (data.guidelines || []).map((line) => line.trim()).filter(Boolean),
-      creatorEmail: data.creatorEmail,
-      creatorName: data.creatorName || "",
-      creatorPhoto: data.creatorPhoto || "",
+      creatorEmail: req.user.email,
+      creatorName: req.user.name || "",
+      creatorPhoto: req.user.image || "",
       volunteersCount: 0,
       createdAt: new Date(),
     };
@@ -247,7 +241,7 @@ app.patch("/events/:id", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
     const data = req.body;
-    const userEmail = req.user.userEmail; // TEMPORARY: will come from the JWT later
+    const userEmail = req.user.email; 
 
     if (!ObjectId.isValid(id)) {
       return res.status(400).json({ message: "That event link is not valid." });
@@ -307,10 +301,10 @@ app.patch("/events/:id", verifyToken, async (req, res) => {
 });
 
 // Delete an event (owner only)
-app.delete("/events/:id", async (req, res) => {
+app.delete("/events/:id", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { email } = req.user.email; // TEMPORARY: will come from the JWT later
+    const email  = req.user.email;
 
     if (!ObjectId.isValid(id)) {
       return res.status(400).json({ message: "That event link is not valid." });
@@ -338,10 +332,11 @@ app.delete("/events/:id", async (req, res) => {
 
 // ---------- Join an event ----------
 
-app.post("/events/:id/join", async (req, res) => {
+app.post("/events/:id/join",verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { userEmail, userName } = req.body; // TEMPORARY: will come from the JWT later
+    const userEmail = req.user.email; 
+    const userName = req.user.name || "";
 
     if (!ObjectId.isValid(id)) {
       return res.status(400).json({ message: "That event link is not valid." });
@@ -394,10 +389,10 @@ app.post("/events/:id/join", async (req, res) => {
 });
 
 // Has this user already joined this event?
-app.get("/events/:id/is-joined", async (req, res) => {
+app.get("/events/:id/is-joined", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { email } = req.query; // TEMPORARY: will come from the JWT later
+    const email  = req.user.email; 
 
     if (!ObjectId.isValid(id) || !email) {
       return res.json({ joined: false });
@@ -417,13 +412,9 @@ app.get("/events/:id/is-joined", async (req, res) => {
 
 // ---------- Joined events list ----------
 
-app.get("/joined-events", async (req, res) => {
+app.get("/joined-events", verifyToken, async (req, res) => {
   try {
-    const { email } = req.query; // TEMPORARY: will come from the JWT later
-
-    if (!email) {
-      return res.status(400).json({ message: "Email is required." });
-    }
+    const { email } = req.user.email;
 
     // Only this user's joins, soonest event first
     const joined = await joinedEvents
