@@ -3,13 +3,28 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { MongoClient, ObjectId } from "mongodb";
 import { createRemoteJWKSet, jwtVerify } from "jose";
+import { getCoordinatesError, toEventCoordinates } from "./event-coordinates.js";
 
 dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 5000;
+const allowedOrigins = new Set(
+  [process.env.CLIENT_URL, "http://localhost:3000", "http://127.0.0.1:3000"].filter(Boolean)
+);
 
-app.use(cors({ origin: [process.env.CLIENT_URL, "http://localhost:3000"] }));
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.has(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error("Origin is not allowed by CORS."));
+    },
+  })
+);
 app.use(express.json());
 
 // ---------- Database ----------
@@ -68,6 +83,11 @@ function validateEvent(data) {
 
   if (!data.location || data.location.trim().length < 3 || data.location.trim().length > 120) {
     errors.location = "Location must be between 3 and 120 characters.";
+  }
+
+  const coordinatesError = getCoordinatesError(data.coordinates);
+  if (coordinatesError) {
+    errors.coordinates = coordinatesError;
   }
 
   // The date must be tomorrow or later
@@ -227,6 +247,10 @@ app.post("/events", verifyToken, async (req, res) => {
       createdAt: new Date(),
     };
 
+    if (data.coordinates != null) {
+      newEvent.coordinates = toEventCoordinates(data.coordinates);
+    }
+
     const result = await events.insertOne(newEvent);
 
     res.status(201).json({ message: "Event created successfully.", eventId: result.insertedId });
@@ -277,20 +301,33 @@ app.patch("/events/:id", verifyToken, async (req, res) => {
       updatedAt: new Date(),
     };
 
-    await events.updateOne({ _id: event._id }, { $set: changes });
+    const eventUpdate = { $set: changes };
+    if (data.coordinates === null) {
+      eventUpdate.$unset = { coordinates: "" };
+    } else if (data.coordinates !== undefined) {
+      changes.coordinates = toEventCoordinates(data.coordinates);
+    }
+
+    await events.updateOne({ _id: event._id }, eventUpdate);
 
     // Joined events keep a copy of the event details, so keep those copies up to date too
+    const joinedChanges = {
+      title: changes.title,
+      thumbnail: changes.thumbnail,
+      location: changes.location,
+      eventType: changes.eventType,
+      eventDate: changes.eventDate,
+    };
+    const joinedUpdate = { $set: joinedChanges };
+    if (data.coordinates === null) {
+      joinedUpdate.$unset = { coordinates: "" };
+    } else if (data.coordinates !== undefined) {
+      joinedChanges.coordinates = changes.coordinates;
+    }
+
     await joinedEvents.updateMany(
       { eventId: event._id },
-      {
-        $set: {
-          title: changes.title,
-          thumbnail: changes.thumbnail,
-          location: changes.location,
-          eventType: changes.eventType,
-          eventDate: changes.eventDate,
-        },
-      }
+      joinedUpdate
     );
 
     res.json({ message: "Event updated successfully." });
@@ -369,6 +406,7 @@ app.post("/events/:id/join",verifyToken, async (req, res) => {
         location: event.location,
         eventType: event.eventType,
         eventDate: event.eventDate,
+        ...(event.coordinates ? { coordinates: event.coordinates } : {}),
         joinedAt: new Date(),
       });
     } catch (error) {
@@ -414,7 +452,7 @@ app.get("/events/:id/is-joined", verifyToken, async (req, res) => {
 
 app.get("/joined-events", verifyToken, async (req, res) => {
   try {
-    const { email } = req.user.email;
+    const email = req.user.email;
 
     // Only this user's joins, soonest event first
     const joined = await joinedEvents
