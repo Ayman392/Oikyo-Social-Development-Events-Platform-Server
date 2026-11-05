@@ -3,14 +3,21 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { MongoClient, ObjectId } from "mongodb";
 import { createRemoteJWKSet, jwtVerify } from "jose";
-import { getCoordinatesError, toEventCoordinates } from "./event-coordinates.js";
+import {
+  getCoordinatesError,
+  toEventCoordinates,
+} from "./event-coordinates.js";
 
 dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 5000;
 const allowedOrigins = new Set(
-  [process.env.CLIENT_URL, "http://localhost:3000", "http://127.0.0.1:3000"].filter(Boolean)
+  [
+    process.env.CLIENT_URL,
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+  ].filter(Boolean),
 );
 
 app.use(
@@ -23,7 +30,7 @@ app.use(
 
       callback(new Error("Origin is not allowed by CORS."));
     },
-  })
+  }),
 );
 app.use(express.json());
 
@@ -65,11 +72,19 @@ function isValidUrl(text) {
 function validateEvent(data) {
   const errors = {};
 
-  if (!data.title || data.title.trim().length < 3 || data.title.trim().length > 100) {
+  if (
+    !data.title ||
+    data.title.trim().length < 3 ||
+    data.title.trim().length > 100
+  ) {
     errors.title = "Title must be between 3 and 100 characters.";
   }
 
-  if (!data.description || data.description.trim().length < 20 || data.description.trim().length > 1000) {
+  if (
+    !data.description ||
+    data.description.trim().length < 20 ||
+    data.description.trim().length > 1000
+  ) {
     errors.description = "Description must be between 20 and 1000 characters.";
   }
 
@@ -81,7 +96,11 @@ function validateEvent(data) {
     errors.thumbnail = "Please enter a valid image URL.";
   }
 
-  if (!data.location || data.location.trim().length < 3 || data.location.trim().length > 120) {
+  if (
+    !data.location ||
+    data.location.trim().length < 3 ||
+    data.location.trim().length > 120
+  ) {
     errors.location = "Location must be between 3 and 120 characters.";
   }
 
@@ -105,7 +124,10 @@ function validateEvent(data) {
   // Guidelines are optional, but if given, each line must be a sensible length
   if (data.guidelines !== undefined) {
     const lines = Array.isArray(data.guidelines) ? data.guidelines : [];
-    if (lines.length > 6 || lines.some((line) => line.trim().length < 3 || line.trim().length > 150)) {
+    if (
+      lines.length > 6 ||
+      lines.some((line) => line.trim().length < 3 || line.trim().length > 150)
+    ) {
       errors.guidelines = "Add up to 6 guidelines, each 3 to 150 characters.";
     }
   }
@@ -117,13 +139,17 @@ function validateEvent(data) {
 
 // The address of the client site, where the login system publishes its public keys
 const AUTH_URL = process.env.AUTH_URL;
-const keys = AUTH_URL ? createRemoteJWKSet(new URL(`${AUTH_URL}/api/auth/jwks`)) : null;
+const keys = AUTH_URL
+  ? createRemoteJWKSet(new URL(`${AUTH_URL}/api/auth/jwks`))
+  : null;
 
 // Put this in front of any route that needs a logged-in user.
 // It reads the token, checks it, and saves who the user is in req.user.
 async function verifyToken(req, res, next) {
   if (!keys) {
-    return res.status(500).json({ message: "The server is not set up to check logins yet." });
+    return res
+      .status(500)
+      .json({ message: "The server is not set up to check logins yet." });
   }
 
   const header = req.headers.authorization || "";
@@ -140,13 +166,21 @@ async function verifyToken(req, res, next) {
     });
 
     if (!payload.email) {
-      return res.status(401).json({ message: "Your login could not be verified." });
+      return res
+        .status(401)
+        .json({ message: "Your login could not be verified." });
     }
 
-    req.user = { email: payload.email, name: payload.name, image: payload.image };
+    req.user = {
+      email: payload.email,
+      name: payload.name,
+      image: payload.image,
+    };
     next();
   } catch (error) {
-    res.status(401).json({ message: "Your session has expired. Please log in again." });
+    res
+      .status(401)
+      .json({ message: "Your session has expired. Please log in again." });
   }
 }
 
@@ -229,7 +263,9 @@ app.post("/events", verifyToken, async (req, res) => {
 
     const errors = validateEvent(data);
     if (Object.keys(errors).length > 0) {
-      return res.status(400).json({ message: "Please fix the errors and try again.", errors });
+      return res
+        .status(400)
+        .json({ message: "Please fix the errors and try again.", errors });
     }
 
     const newEvent = {
@@ -239,7 +275,9 @@ app.post("/events", verifyToken, async (req, res) => {
       thumbnail: data.thumbnail.trim(),
       location: data.location.trim(),
       eventDate: new Date(data.eventDate),
-      guidelines: (data.guidelines || []).map((line) => line.trim()).filter(Boolean),
+      guidelines: (data.guidelines || [])
+        .map((line) => line.trim())
+        .filter(Boolean),
       creatorEmail: req.user.email,
       creatorName: req.user.name || "",
       creatorPhoto: req.user.image || "",
@@ -253,7 +291,12 @@ app.post("/events", verifyToken, async (req, res) => {
 
     const result = await events.insertOne(newEvent);
 
-    res.status(201).json({ message: "Event created successfully.", eventId: result.insertedId });
+    res
+      .status(201)
+      .json({
+        message: "Event created successfully.",
+        eventId: result.insertedId,
+      });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Could not create the event." });
@@ -265,14 +308,16 @@ app.patch("/events/:id", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
     const data = req.body;
-    const userEmail = req.user.email; 
+    const userEmail = req.user.email;
 
     if (!ObjectId.isValid(id)) {
       return res.status(400).json({ message: "That event link is not valid." });
     }
 
     if (!userEmail) {
-      return res.status(401).json({ message: "Please log in to update an event." });
+      return res
+        .status(401)
+        .json({ message: "Please log in to update an event." });
     }
 
     const event = await events.findOne({ _id: new ObjectId(id) });
@@ -282,12 +327,16 @@ app.patch("/events/:id", verifyToken, async (req, res) => {
 
     // Only the person who created the event can change it
     if (event.creatorEmail !== userEmail) {
-      return res.status(403).json({ message: "You can only update events you created." });
+      return res
+        .status(403)
+        .json({ message: "You can only update events you created." });
     }
 
     const errors = validateEvent(data);
     if (Object.keys(errors).length > 0) {
-      return res.status(400).json({ message: "Please fix the errors and try again.", errors });
+      return res
+        .status(400)
+        .json({ message: "Please fix the errors and try again.", errors });
     }
 
     const changes = {
@@ -297,7 +346,9 @@ app.patch("/events/:id", verifyToken, async (req, res) => {
       thumbnail: data.thumbnail.trim(),
       location: data.location.trim(),
       eventDate: new Date(data.eventDate),
-      guidelines: (data.guidelines || []).map((line) => line.trim()).filter(Boolean),
+      guidelines: (data.guidelines || [])
+        .map((line) => line.trim())
+        .filter(Boolean),
       updatedAt: new Date(),
     };
 
@@ -325,10 +376,7 @@ app.patch("/events/:id", verifyToken, async (req, res) => {
       joinedChanges.coordinates = changes.coordinates;
     }
 
-    await joinedEvents.updateMany(
-      { eventId: event._id },
-      joinedUpdate
-    );
+    await joinedEvents.updateMany({ eventId: event._id }, joinedUpdate);
 
     res.json({ message: "Event updated successfully." });
   } catch (error) {
@@ -341,7 +389,7 @@ app.patch("/events/:id", verifyToken, async (req, res) => {
 app.delete("/events/:id", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const email  = req.user.email;
+    const email = req.user.email;
 
     if (!ObjectId.isValid(id)) {
       return res.status(400).json({ message: "That event link is not valid." });
@@ -353,7 +401,9 @@ app.delete("/events/:id", verifyToken, async (req, res) => {
     }
 
     if (event.creatorEmail !== email) {
-      return res.status(403).json({ message: "You can only delete events you created." });
+      return res
+        .status(403)
+        .json({ message: "You can only delete events you created." });
     }
 
     // Remove the volunteers' joins first, then the event itself
@@ -369,10 +419,10 @@ app.delete("/events/:id", verifyToken, async (req, res) => {
 
 // ---------- Join an event ----------
 
-app.post("/events/:id/join",verifyToken, async (req, res) => {
+app.post("/events/:id/join", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const userEmail = req.user.email; 
+    const userEmail = req.user.email;
     const userName = req.user.name || "";
 
     if (!ObjectId.isValid(id)) {
@@ -380,7 +430,9 @@ app.post("/events/:id/join",verifyToken, async (req, res) => {
     }
 
     if (!userEmail) {
-      return res.status(400).json({ message: "Please log in to join an event." });
+      return res
+        .status(400)
+        .json({ message: "Please log in to join an event." });
     }
 
     const event = await events.findOne({ _id: new ObjectId(id) });
@@ -392,7 +444,9 @@ app.post("/events/:id/join",verifyToken, async (req, res) => {
     const startOfToday = new Date();
     startOfToday.setUTCHours(0, 0, 0, 0);
     if (event.eventDate < startOfToday) {
-      return res.status(400).json({ message: "This event has already taken place." });
+      return res
+        .status(400)
+        .json({ message: "This event has already taken place." });
     }
 
     // Save the join together with the event and user details
@@ -412,12 +466,17 @@ app.post("/events/:id/join",verifyToken, async (req, res) => {
     } catch (error) {
       // 11000 means the unique index found this user already joined this event
       if (error.code === 11000) {
-        return res.status(409).json({ message: "You have already joined this event." });
+        return res
+          .status(409)
+          .json({ message: "You have already joined this event." });
       }
       throw error;
     }
 
-    await events.updateOne({ _id: event._id }, { $inc: { volunteersCount: 1 } });
+    await events.updateOne(
+      { _id: event._id },
+      { $inc: { volunteersCount: 1 } },
+    );
 
     res.status(201).json({ message: "You have joined this event." });
   } catch (error) {
@@ -430,7 +489,7 @@ app.post("/events/:id/join",verifyToken, async (req, res) => {
 app.get("/events/:id/is-joined", verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const email  = req.user.email; 
+    const email = req.user.email;
 
     if (!ObjectId.isValid(id) || !email) {
       return res.json({ joined: false });
@@ -467,10 +526,10 @@ app.get("/joined-events", verifyToken, async (req, res) => {
   }
 });
 
-if(!process.env.VERCEL){
+if (!process.env.VERCEL) {
   app.listen(port, () => {
     console.log(`Server listening on port ${port}`);
   });
 }
 
-export default  app;
+export default app;

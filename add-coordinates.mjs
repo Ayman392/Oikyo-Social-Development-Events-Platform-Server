@@ -11,7 +11,9 @@ async function geocode(location) {
     "https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=bd&q=" +
     encodeURIComponent(location);
 
-  const res = await fetch(url, { headers: { "User-Agent": "oikyo-seed-script" } });
+  const res = await fetch(url, {
+    headers: { "User-Agent": "oikyo-seed-script" },
+  });
   if (!res.ok) return null;
 
   const [first] = await res.json();
@@ -43,11 +45,16 @@ try {
     if (!coordinates) {
       console.log(`NOT FOUND: ${event.title} (${event.location})`);
     } else {
-      console.log(`${event.title} -> ${coordinates.latitude}, ${coordinates.longitude}`);
+      console.log(
+        `${event.title} -> ${coordinates.latitude}, ${coordinates.longitude}`,
+      );
       if (!dryRun) {
         await events.updateOne({ _id: event._id }, { $set: { coordinates } });
         // Joined events keep a copy of the event details, so update those too
-        await joinedEvents.updateMany({ eventId: event._id }, { $set: { coordinates } });
+        await joinedEvents.updateMany(
+          { eventId: event._id },
+          { $set: { coordinates } },
+        );
       }
     }
 

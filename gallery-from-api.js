@@ -1,58 +1,33 @@
-// Prints gallery photos taken from your own event data (the live API),
-// one event of each type, ready to paste into Gallery.tsx.
-//
-// Run it in the Server folder:   node gallery-from-api.js
-// To read your local API instead: API_URL=http://localhost:5000 node gallery-from-api.js
+const key = process.env.UNSPLASH_ACCESS_KEY;
 
-const API_URL = process.env.API_URL || "https://social-development-events-platform-three.vercel.app";
-
-const res = await fetch(`${API_URL}/events/upcoming`);
-if (!res.ok) {
-  console.log(`The API replied with status ${res.status}. Check that the server is running.`);
-  process.exit(1);
-}
-
-const events = await res.json();
-
-// One event for each type, so the gallery shows different kinds of work
-const typesWanted = [
-  "Cleanup",
-  "Plantation",
-  "Donation",
-  "Education",
-  "Health Camp",
-  "Food Distribution",
+const searches = [
+  { query: "volunteers river cleanup bangladesh", alt: "Volunteers cleaning up a riverbank" },
+  { query: "tree planting volunteers community", alt: "Volunteers planting trees together" },
+  { query: "winter clothes donation charity", alt: "Winter clothes being donated to families" },
+  { query: "village school children bangladesh", alt: "Children at a free community class" },
+  { query: "free medical camp doctor village", alt: "A free health camp for local residents" },
+  { query: "volunteers distributing food packages", alt: "Food packages being handed out to families" },
 ];
 
-const usedPhotos = new Set();
-const picked = [];
+for (const { query, alt } of searches) {
+  const url =
+    "https://api.unsplash.com/search/photos?per_page=1&orientation=squarish&query=" +
+    encodeURIComponent(query);
 
-for (const type of typesWanted) {
-  const event = events.find(
-    (e) => e.eventType === type && e.thumbnail && !usedPhotos.has(e.thumbnail)
-  );
-
-  if (!event) {
-    console.log(`// No event of type "${type}" was found, so it is skipped.`);
+  const res = await fetch(url, { headers: { Authorization: `Client-ID ${key}` } });
+  if (!res.ok) {
+    console.log(`// FAILED (${res.status}): ${query}`);
     continue;
   }
 
-  usedPhotos.add(event.thumbnail);
-  picked.push({
-    type,
-    title: event.title,
-    // The gallery uses 800px photos, and the large view swaps w=800 for w=1600
-    src: event.thumbnail.replace(/w=\d+/, "w=800"),
-  });
-}
+  const { results } = await res.json();
+  const photo = results[0];
 
-console.log(`Found ${picked.length} photos from ${events.length} events.\n`);
-console.log("Paste this into the photos list in Gallery.tsx:\n");
+  if (!photo) {
+    console.log(`// NO RESULT: ${query}`);
+    continue;
+  }
 
-for (const item of picked) {
-  console.log(`  // ${item.type}: ${item.title}`);
-  console.log("  {");
-  console.log(`    src: "${item.src}",`);
-  console.log(`    alt: "${item.title.replace(/"/g, '\\"')}",`);
-  console.log("  },");
+  console.log(`  // Photo by ${photo.user.name} on Unsplash`);
+  console.log(`  { src: "${photo.urls.regular}", alt: "${alt}" },`);
 }

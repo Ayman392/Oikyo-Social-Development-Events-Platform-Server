@@ -6,7 +6,9 @@ import fs from "fs";
 
 const accessKey = process.env.UNSPLASH_ACCESS_KEY;
 if (!accessKey) {
-  console.log("Please add UNSPLASH_ACCESS_KEY=your_key to your .env file first.");
+  console.log(
+    "Please add UNSPLASH_ACCESS_KEY=your_key to your .env file first.",
+  );
   process.exit(1);
 }
 
@@ -34,9 +36,13 @@ async function search(query) {
     "https://api.unsplash.com/search/photos" +
     `?query=${encodeURIComponent(query)}&per_page=10&orientation=landscape`;
 
-  const res = await fetch(url, { headers: { Authorization: `Client-ID ${accessKey}` } });
+  const res = await fetch(url, {
+    headers: { Authorization: `Client-ID ${accessKey}` },
+  });
   if (!res.ok) {
-    throw new Error(`Unsplash replied with status ${res.status}. Check your access key.`);
+    throw new Error(
+      `Unsplash replied with status ${res.status}. Check your access key.`,
+    );
   }
   const data = await res.json();
   return data.results;
@@ -73,4 +79,6 @@ for (const event of events) {
 }
 
 fs.writeFileSync("./events.json", JSON.stringify(events, null, 2) + "\n");
-console.log("\nDone. events.json now has matching photos. Run: node import-events.js");
+console.log(
+  "\nDone. events.json now has matching photos. Run: node import-events.js",
+);
